@@ -1,0 +1,179 @@
+version: '3'
+
+services:
+  # jackett:
+  #   image: ghcr.io/linuxserver/jackett
+  #   container_name: jackett
+  #   environment:
+  #     PUID: "1000"
+  #   volumes:
+  #   - ./jackett/config:/config
+  #   - ./jackett/downloads:/downloads
+  #   networks:
+  #     - default
+  #     - web_net_nginx_proxy
+  #   restart: always
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      LOG_LEVEL: info
+      LOG_HTML: 'false'
+      CAPTCHA_SOLVER: none
+      TZ: Europe/Amsterdam
+    restart: always
+
+  prowlarr:
+    depends_on:
+      - flaresolverr
+    image: ghcr.io/linuxserver/prowlarr:develop
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Amsterdam
+    volumes:
+    - ./prowlarr/config_gi/:/config
+      #    ports:
+      #    - 9696:9696
+    labels:
+      traefik.enable: true
+      traefik.http.routers.prowlarr.entrypoints: websecure
+      traefik.http.routers.prowlarr.rule: Host(`prowlarr.l.brakenium.xyz`)
+      traefik.http.routers.prowlarr.tls: true
+      traefik.http.routers.prowlarr.tls.certresolver: cloudflare
+    restart: always
+
+  radarr:
+    depends_on:
+      - prowlarr
+    image: ghcr.io/linuxserver/radarr
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Amsterdam
+    volumes:
+    - ./radarr/config_gi:/config:rw
+    - nas-media-Films:/movies:rw
+    - nas-downloads-radarr:/downloads:rw
+    labels:
+      traefik.enable: true
+      traefik.http.routers.radarr.entrypoints: websecure
+      traefik.http.routers.radarr.rule: Host(`radarr.l.brakenium.xyz`)
+      traefik.http.routers.radarr.tls: true
+      traefik.http.routers.radarr.tls.certresolver: cloudflare
+    restart: always
+
+  sonarr:
+    depends_on:
+      - prowlarr
+    image: ghcr.io/linuxserver/sonarr
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Amsterdam
+    volumes:
+    - ./sonarr/config_gi/:/config
+    - nas-media-series:/tv
+    - nas-downloads-sonarr:/downloads
+    labels:
+      traefik.enable: true
+      traefik.http.routers.sonarr.entrypoints: websecure
+      traefik.http.routers.sonarr.rule: Host(`sonarr.l.brakenium.xyz`)
+      traefik.http.routers.sonarr.tls: true
+      traefik.http.routers.sonarr.tls.certresolver: cloudflare
+    restart: always
+
+  bazarr:
+    image: ghcr.io/linuxserver/bazarr
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Amsterdam
+    volumes:
+    - ./bazarr/config_gi:/config
+    - nas-media-Films:/movies
+    - nas-media-series:/tv
+    labels:
+      traefik.enable: true
+      traefik.http.routers.bazarr.rule: Host(`bazarr.l.brakenium.xyz`)
+      traefik.http.routers.bazarr.entrypoints: websecure
+      traefik.http.routers.bazarr.tls: true
+      traefik.http.routers.bazarr.tls.certresolver: cloudflare
+    restart: always
+
+  plex:
+    image: lscr.io/linuxserver/plex
+    network_mode: host
+    environment:
+      PUID: 1000
+      PGID: 1000
+      VERSION: docker
+      PLEX_CLAIM: ${PLEX_CLAIM}
+    volumes:
+      - ./plex/config_gi/:/config
+      - ./plex/plugins_gi/:/config/Library/Application Support/Plex Media Server/Plug-ins
+      - nas-media-series:/tv
+      - nas-media-Films:/movies
+    restart: always
+
+  plextraktsync:
+    image: ghcr.io/taxel/plextraktsync
+    command: sync
+    volumes:
+      - ./plextraktsync:/app/config
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    restart: always
+
+  scheduler:
+    image: mcuadros/ofelia:latest
+    container_name: scheduler
+    depends_on:
+      - plextraktsync
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      ofelia.job-run.plextraktsync.schedule: "5-59/15 * * * *"
+      ofelia.job-run.plextraktsync.container: "plextraktsync"
+
+volumes:
+  nas-media-Films:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/Films/Films/
+  nas-media-series:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/Films/series/
+
+  nas-downloads-radarr:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/downloads/radarr/
+  nas-downloads-radarr-3d:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/downloads/radarr-3d/
+  nas-downloads-sonarr:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/downloads/sonarr
+  nas-downloads-readarr:
+    driver: local
+    driver_opts:
+      type: cifs 
+      o: username=${AD_USERNAME},password=${AD_PASSWORD},uid=1000,gid=1000
+      device: //10.10.10.2/downloads/readarr

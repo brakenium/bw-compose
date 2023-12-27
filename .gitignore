@@ -1,0 +1,14 @@
+/.vscode/
+/lemmy/volumes/
+*backup*.tar*
+*.old
+*.env
+*_gi*
+*key.pem
+*.log
+*.sqlite
+*.db
+servarr/plextraktsync/.pytrakt.json
+
+!/servarr/plextraktsync/.env
+servarr/plextraktsync/servers.yml

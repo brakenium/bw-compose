@@ -1,0 +1,119 @@
+version: '3.3'
+
+services:
+  proxy:
+    image: traefik
+    network_mode: host
+    volumes:
+      - ./mkcert/:/etc/certs/
+      - ./traefik/certs-traefik.yml:/etc/traefik/dynamic/traefik.yml
+      - ./traefik/letsencrypt_gi/:/letsencrypt/
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CF_API_EMAIL=${CLOUDFLARE_EMAIL}
+      - CF_DNS_API_TOKEN=${CLOUDFLARE_TRAEFIK_DNS_TOKEN}
+      - CF_ZONE_API_TOKEN=${CLOUDFLARE_TRAEFIK_ZONE_TOKEN}
+    command:
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.cloudflare.acme.dnschallenge=true
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.cloudflare.acme.email=brake@brakenium.xyz
+      - --certificatesresolvers.cloudflare.acme.storage=/letsencrypt/acme.json
+      # - --certificatesresolvers.cloudflare.acme.caserver=https://acme-staging-v02.api.letsencrypt.org/directory
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53
+    labels:
+      traefik.enable: true
+      traefik.http.routers.traefik_dash.rule: Host(`traefik.l.brakenium.xyz`)
+      traefik.http.services.justAdummyService.loadbalancer.server.port: "1337"
+      traefik.http.routers.traefik_dash.entrypoints: websecure
+      traefik.http.routers.traefik_dash.tls: true
+      traefik.http.routers.traefik_dash.tls.certresolver: cloudflare
+      traefik.http.routers.traefik_dash.service: api@internal
+    restart: always
+
+  heimdall:
+    image: linuxserver/heimdall
+    container_name: heimdall
+    environment:
+    - PUID=1000
+    - PGID=1000
+    - TZ=Europe/Amsterdam
+    volumes:
+    - ./heimdall_gi:/config
+    labels:
+      traefik.enable: true
+      traefik.http.routers.heimdall.rule: Host(`p.l.brakenium.xyz`)
+      traefik.http.routers.heimdall.entrypoints: websecure
+      traefik.http.routers.heimdall.tls: true
+      traefik.http.routers.heimdall.tls.certresolver: cloudflare
+    restart: unless-stopped
+
+  wikijs:
+    image: requarks/wiki:2
+    environment:
+      DB_TYPE: mariadb
+      DB_HOST: nas.brake.ps2
+      DB_PORT: '3307'
+      DB_USER: wikijs
+      DB_PASS: ${wikijs_password}
+      DB_NAME: wikijs
+    # ports:
+    #   - 8080:3000
+    labels:
+      traefik.enable: true
+      traefik.http.routers.wikijs.rule: Host(`wiki.l.brakenium.xyz`)
+      traefik.http.routers.wikijs.entrypoints: websecure
+      traefik.http.routers.wikijs.tls: true
+      traefik.http.routers.wikijs.tls.certresolver: cloudflare
+    restart: unless-stopped
+
+  smtp-relay:
+    image: boky/postfix
+    environment:
+      ALLOWED_SENDER_DOMAINS: ${ALLOWED_SENDER_DOMAINS_SMTP_RELAY}
+      RELAYHOST: ${SENDGRID_HOST}:${SENDGRID_PORT_StartTLS}
+      # RELAYHOST_PASSWORD: ${SENDGRID_RELAY_API_KEY}
+      POSTFIX_smtp_tls_security_level: encrypt
+      POSTFIX_smtp_sasl_auth_enable: "yes"
+      POSTFIX_smtp_sasl_password_maps: static:apikey:${SENDGRID_RELAY_API_KEY}
+      POSTFIX_smtp_sasl_security_options: noanonymous
+      POSTFIX_smtp_sasl_tls_security_options: noanonymous
+      POSTFIX_header_size_limit: 4096000
+    # volumes:
+    #   - ./smtp-relay/sasl-passwd:/etc/postfix/sasl_passwd
+    #   - ./smtp-relay/sasl-passwd.lmdb:/etc/postfix/sasl_passwd.lmdb
+    ports:
+      - 587:587
+    restart: unless-stopped
+
+# ------------------------------------------
+# Docker metrics
+# ------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+    - 9090:9090
+    command:
+    - --config.file=/etc/prometheus/prometheus.yaml
+    volumes:
+    - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+    depends_on:
+    - cadvisor
+    restart: unless-stopped
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: cadvisor
+    volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:rw
+    - /sys:/sys:ro
+    - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
