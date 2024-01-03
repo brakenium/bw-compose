@@ -1,8 +1,8 @@
 /.vscode/
 /lemmy/volumes/
-*backup*.tar*
+/*/*backup*.tar*
 *.old
-*.env
+/*/*.env
 *_gi*
 *key.pem
 *.log
